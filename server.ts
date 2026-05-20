@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
-import { createServer as createViteServer } from "vite";
 
 dotenv.config();
 
@@ -127,8 +126,17 @@ async function connectToMongo() {
   }
 }
 
+let dbConnectionPromise: Promise<void> | null = null;
+
+function ensureMongoConnected(): Promise<void> {
+  if (!dbConnectionPromise) {
+    dbConnectionPromise = connectToMongo();
+  }
+  return dbConnectionPromise;
+}
+
 // Spark database routine
-connectToMongo();
+ensureMongoConnected();
 
 // Helper to access MongoDB collection safely
 function getContactsCol() {
@@ -139,6 +147,18 @@ function getContactsCol() {
 }
 
 // API Routes
+
+// Connection health and check middleware for all API requests
+app.use(async (req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    try {
+      await ensureMongoConnected();
+    } catch (e) {
+      console.error("Middleware MongoDB connection error status:", e);
+    }
+  }
+  next();
+});
 
 // 1. Get DB / System configuration info
 app.get("/api/config", (req, res) => {
@@ -342,6 +362,7 @@ app.delete("/api/contacts/:id", async (req, res) => {
 // Vite & Static file handler integration
 async function setupViteOrStatic() {
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
